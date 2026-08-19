@@ -5,7 +5,7 @@ from django.core.mail import send_mail
 from django.http import JsonResponse
 from django.views.decorators.http import require_POST
 from django.views.decorators.csrf import csrf_exempt
-
+from django.conf import settings
 from .firebase_config import FirebaseConfigurationError, get_db
 from .email_services import send_paper_notification
 
@@ -43,7 +43,7 @@ This is a test email from PaperNova.
 
 The Django email system is working successfully.
 """,
-        from_email=None,
+        from_email=settings.DEFAULT_FROM_EMAIL,
         recipient_list=[recipient_email],
         fail_silently=False,
     )
