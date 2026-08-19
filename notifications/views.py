@@ -1,12 +1,34 @@
+import os
+from functools import wraps
+from secrets import compare_digest
 from django.core.mail import send_mail
 from django.http import JsonResponse
-from .firebase_config import db
+from django.views.decorators.http import require_POST
+from django.views.decorators.csrf import csrf_exempt
+
+from .firebase_config import FirebaseConfigurationError, get_db
 from .email_services import send_paper_notification
 
 
+def require_notifications_api_key(view):
+    """Protect operational endpoints from unauthenticated public requests."""
+    @wraps(view)
+    def wrapped_view(request, *args, **kwargs):
+        expected_key = os.getenv("NOTIFICATIONS_API_KEY", "")
+        supplied_key = request.headers.get("X-API-Key", "")
+        if not expected_key or not compare_digest(supplied_key, expected_key):
+            return JsonResponse({"error": "Unauthorized"}, status=401)
+        return view(request, *args, **kwargs)
+
+    return wrapped_view
+
+
+@require_POST
+@csrf_exempt
+@require_notifications_api_key
 def test_email(request):
 
-    recipient_email = request.GET.get("email")
+    recipient_email = request.POST.get("email")
 
     if not recipient_email:
         return JsonResponse({
@@ -32,13 +54,13 @@ The Django email system is working successfully.
     })
 
 
+@require_POST
+@require_notifications_api_key
 def test_firebase(request):
-
-    users = (
-        db.collection("users")
-        .limit(5)
-        .stream()
-    )
+    try:
+        users = get_db().collection("users").limit(5).stream()
+    except FirebaseConfigurationError:
+        return JsonResponse({"error": "Firebase is not configured"}, status=503)
 
     result = []
 
@@ -50,9 +72,12 @@ def test_firebase(request):
     })
 
 
+@require_POST
+@require_notifications_api_key
+@csrf_exempt
 def notify_paper_uploaded(request):
 
-    paper_id = request.GET.get("paper_id")
+    paper_id = request.POST.get("paper_id")
 
     if not paper_id:
         return JsonResponse({
@@ -60,8 +85,12 @@ def notify_paper_uploaded(request):
         }, status=400)
 
     # Get the uploaded paper
-    paper_ref = db.collection("papers").document(paper_id)
-    paper_snapshot = paper_ref.get()
+    try:
+        db = get_db()
+        paper_ref = db.collection("papers").document(paper_id)
+        paper_snapshot = paper_ref.get()
+    except FirebaseConfigurationError:
+        return JsonResponse({"error": "Firebase is not configured"}, status=503)
 
     if not paper_snapshot.exists:
         return JsonResponse({
@@ -125,4 +154,10 @@ def notify_paper_uploaded(request):
         "paper": paper,
         "sent": sent,
         "failed": failed,
+    })
+
+def home(request):
+    return JsonResponse({
+        "status": "success",
+        "message": "PaperNova backend is running"
     })
